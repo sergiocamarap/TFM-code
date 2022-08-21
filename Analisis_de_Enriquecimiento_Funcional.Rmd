@@ -1,0 +1,372 @@
+---
+title: "Análisis de Enriquecimiento Funcional con el paquete clusterProfiler"
+author: "Sergio Cámara Peña"
+date: '2022-06-23'
+output: html_document
+---
+
+# Introducción
+
+El objetivo de este programa es, mediante el uso del paquete **clusterProfiler**[1], encontrar que términos se encuentran enriquecidos para los 3 **GO terms**:
+
+- **Molecular Function** (MF)
+- **Biological Process** (BP)
+- **Cellular Component** (CC)
+
+Esto, para cada uno de los 3 grupos que se han descrito en el documento de la memoria en relación a la enfermedad sobre la que se está trabajando en este proyecto, el **Carcinoma Escamoso de Cabeza y Cuello** (HNSCC). Para crear estos 3 grupos, nos fijamos en dos cosas. En primer lugar, se observa la relación que tiene la **metilación con el splicing alternativo (AS)**, para lo cual nos fijamos en el p-valor "**Pv_wilcox**"; y, en segundo lugar, se observa la relación que tiene la **metilación con la expresión**, para lo cual nos fijamos en el p-valor "**P.value**".
+
+Los 3 grupos generados son:
+
+- **Metilación relacionada con Splicing Alternativo y Expresión** (AS y E)
+- **Metilación relacionada con Splicing Alternativo, pero no con la Expresión** (AS y not E)
+- **Metilación relacionada con Splicing Alternativo (aquí no ponemos foco en la expresión)** (AS related)
+
+Nos centramos únicamente en estos grupos debido a que son los que más nos interesan de cara al objetivo final de nuestro proyecto, el cual pone el foco en relacionar *probes* de metilación con eventos de *splicing alternativo* que afectan de diversa manera en el desarrollo del HNSCC.
+
+### ¿Cómo se llevó a cabo el proceso? ¿Cómo se deben analizar los resultados que se obtienen?
+
+De cara a no sobrecargar este documento y para que quede explicado de forma concisa como se tienen que analizar los resultados y como es el proceso hasta su obtención, aquí se explicará siguiendo como modelo el caso del primer grupo generado (AS y E).
+
+En primer lugar, tras haber leído y limpiado los datos, se empieza con el proceso que es único para cada grupo. Inicialmente, se filtran los datos para que queden únicamente aquellos genes que nos interesan para cada grupo. En este caso, queremos que la metilación esté relacionada con el splicing (**"Pv_wilcox" significativo**) y que la metilación esté relacionada con la expresión génica (**"P.Value" significativo**).
+
+A continuación, una cosa importante que se hace es pasar de *gene symbol*, con el que el paquete **clusterProfiler** no puede trabajar, a **Entrez Gene ID** el cual es el *input* adecuado para este paquete.
+
+Finalmente, ya que el proceso es repetitivo, nos fijaremos únicamente en una de las ontologías para explicar el proceso y analizar los resultados. Para ello nos centraremos en la ontología de **Celular Component** (CC).
+
+#### Clasificación ontológica
+
+Dada una lista de genes y utilizando la función **groupGO()**, se devuelve su perfil ontológico. Es decir, para cada gen se devuelven los términos ontológicos asociados y se cuenta cuantas veces aparece cada uno de estos términos en el conjunto de nuestros genes. A continuación, se representan en un **barplot** los 25 primeros resultados. Finalmente, se pasa al test de sobrerrepresentación.
+
+#### Test de Sobrerrepresentación
+
+Este test es un método estadístico que determina si los genes de conjuntos predefinidos (pertenecientes, por ejemplo, a un *Gene Ontology term* concreto) se encuentran más veces de lo que se podría esperar en el conjunto de tus datos [2]. 
+
+**Nota**: Se puede ver en los test de sobrerrepresentación que los parámetros **pvalueCutoff** y **qvalueCutoff**, han recibido un valor de **0.05** y **0.2** respectivamente. Estos valores no son arbitrarios, sino que, son los que se recomiendan por defecto en la guía del paquete clusterProfiler.
+
+Tras haber obtenido los resultados del test de sobrerrepresentación, en primer lugar, se grafican los términos más enriquecidos de nuestro conjunto de datos en un **barplot** junto a su p.valor asociado, hasta un máximo de 8 términos (parámetro por defecto). En segundo lugar, estos términos son representados en un **grafo** donde se muestra cómo se encuentran relacionados.
+
+A continuación, una vez hechas las explicaciones previas, se exponen los resultados obtenidos para cada grupo junto con el código que se ha utilizado en cada caso para llegar a estos.
+
+# Cargamos los paquetes necesarios para el programa
+
+```{r, message=FALSE, warning=FALSE}
+library(clusterProfiler)
+library(tidyverse)
+library(org.Hs.eg.db)
+```
+
+# Lectura y limpieza de los datos
+
+```{r, message=FALSE, warning=FALSE}
+Datos_originales <- read_delim("20222_01_21_Hit_wilcox_expr_Surv.csv", 
+                               delim = ";", escape_double = FALSE, 
+                               locale = locale(decimal_mark = ",", 
+                                               grouping_mark = "."), 
+                               trim_ws = TRUE)
+
+Datos_limpios <- Datos_originales %>% 
+  dplyr::select(-c("...1","Pathway","Reference"))
+
+Lista_total_genes <- unique(Datos_limpios$Gene)
+```
+
+# Grupo **Alternative Splicing and Expression related (AS y E)**
+
+```{r, message=FALSE, warning=FALSE}
+AS_y_E_df <- Datos_limpios %>% 
+  dplyr::filter(Pv_wilcox < 0.05,
+                P.Value < 0.05)
+
+Lista_genes_AS_y_E <- unique(AS_y_E_df$Gene)
+
+AS_y_E_ENTREZ <- mapIds(org.Hs.eg.db, Lista_genes_AS_y_E, 'ENTREZID', 'SYMBOL')
+```
+
+### **GO Celular Component** - GO classification
+
+```{r, message=FALSE, warning=FALSE}
+gg_CC_AS_y_E <- groupGO(gene = AS_y_E_ENTREZ,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "CC",
+                        level = 3,
+                        readable = TRUE)
+
+head(gg_CC_AS_y_E)
+barplot(gg_CC_AS_y_E, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Celular Component** - Go Over-representation analysis
+
+```{r, message=FALSE, warning=FALSE}
+go_overrepresentation_CC_AS_y_E <- enrichGO(gene = AS_y_E_ENTREZ,
+                                            OrgDb = org.Hs.eg.db,
+                                            ont = "CC",
+                                            pAdjustMethod = "BH",
+                                            pvalueCutoff = 0.05,
+                                            qvalueCutoff = 0.2,
+                                            readable = TRUE)
+head(go_overrepresentation_CC_AS_y_E)
+barplot(go_overrepresentation_CC_AS_y_E)
+goplot(go_overrepresentation_CC_AS_y_E)
+```
+
+### **GO Molecular Function** - GO classification
+
+```{r, message=FALSE, warning=FALSE}
+gg_MF_AS_y_E <- groupGO(gene = AS_y_E_ENTREZ,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "MF",
+                        level = 3,
+                        readable = TRUE)
+
+head(gg_MF_AS_y_E)
+barplot(gg_MF_AS_y_E, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Molecular Function** - Go Over-representation analysis
+
+```{r, message=FALSE, warning=FALSE}
+go_overrepresentation_MF_AS_y_E <- enrichGO(gene = AS_y_E_ENTREZ,
+                                            OrgDb = org.Hs.eg.db,
+                                            ont = "MF",
+                                            pAdjustMethod = "BH",
+                                            pvalueCutoff = 0.05,
+                                            qvalueCutoff = 0.2,
+                                            readable = TRUE)
+head(go_overrepresentation_MF_AS_y_E)
+barplot(go_overrepresentation_MF_AS_y_E)
+goplot(go_overrepresentation_MF_AS_y_E)
+```
+
+### **GO Biological Process** - GO classification
+
+```{r, message=FALSE, warning=FALSE}
+gg_BP_AS_y_E <- groupGO(gene = AS_y_E_ENTREZ,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "BP",
+                        level = 3,
+                        readable = TRUE)
+
+head(gg_BP_AS_y_E)
+barplot(gg_BP_AS_y_E, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Biological Process** - Go Over-representation analysis
+
+```{r, message=FALSE, warning=FALSE}
+go_overrepresentation_BP_AS_y_E <- enrichGO(gene = AS_y_E_ENTREZ,
+                                            OrgDb = org.Hs.eg.db,
+                                            ont = "BP",
+                                            pAdjustMethod = "BH",
+                                            pvalueCutoff = 0.05,
+                                            qvalueCutoff = 0.2,
+                                            readable = TRUE)
+head(go_overrepresentation_BP_AS_y_E)
+barplot(go_overrepresentation_BP_AS_y_E)
+goplot(go_overrepresentation_BP_AS_y_E)
+```
+
+# Grupo **Alternative Splicing but not Expression related (AS y not E)**
+
+```{r, warning=FALSE, message=FALSE}
+AS_y_notE_df <- Datos_limpios %>% 
+  dplyr::filter(Pv_wilcox < 0.05,
+                P.Value > 0.05)
+
+Lista_genes_AS_y_notE <- unique(AS_y_notE_df$Gene)
+
+AS_y_notE_ENTREZ <- mapIds(org.Hs.eg.db, Lista_genes_AS_y_notE, 'ENTREZID', 'SYMBOL')
+```
+
+### **GO Celular Component** - GO classification
+
+```{r, warning=FALSE, message=FALSE}
+gg_CC_AS_y_notE <- groupGO(gene = AS_y_notE_ENTREZ,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "CC",
+                        level = 3,
+                        readable = TRUE)
+
+head(gg_CC_AS_y_notE)
+barplot(gg_CC_AS_y_notE, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Celular Component** - Go Over-representation analysis
+
+```{r, warning=FALSE, message=FALSE}
+go_overrepresentation_CC_AS_y_notE <- enrichGO(gene = AS_y_notE_ENTREZ,
+                                            OrgDb = org.Hs.eg.db,
+                                            ont = "CC",
+                                            pAdjustMethod = "BH",
+                                            pvalueCutoff = 0.05,
+                                            qvalueCutoff = 0.2,
+                                            readable = TRUE)
+head(go_overrepresentation_CC_AS_y_notE)
+barplot(go_overrepresentation_CC_AS_y_notE)
+goplot(go_overrepresentation_CC_AS_y_notE)
+```
+
+### **GO Molecular Function** - GO classification
+
+```{r, warning=FALSE, message=FALSE}
+gg_MF_AS_y_notE <- groupGO(gene = AS_y_notE_ENTREZ,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "MF",
+                        level = 3,
+                        readable = TRUE)
+
+head(gg_MF_AS_y_notE)
+barplot(gg_MF_AS_y_notE, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Molecular Function** - Go Over-representation analysis
+
+```{r, warning=FALSE, message=FALSE}
+go_overrepresentation_MF_AS_y_notE <- enrichGO(gene = AS_y_notE_ENTREZ,
+                                            OrgDb = org.Hs.eg.db,
+                                            ont = "MF",
+                                            pAdjustMethod = "BH",
+                                            pvalueCutoff = 0.05,
+                                            qvalueCutoff = 0.2,
+                                            readable = TRUE)
+head(go_overrepresentation_MF_AS_y_notE)
+barplot(go_overrepresentation_MF_AS_y_notE)
+goplot(go_overrepresentation_MF_AS_y_notE)
+```
+
+### **GO Biological Process** - GO classification
+
+```{r, warning=FALSE, message=FALSE}
+gg_BP_AS_y_notE <- groupGO(gene = AS_y_notE_ENTREZ,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "BP",
+                        level = 3,
+                        readable = TRUE)
+
+head(gg_BP_AS_y_notE)
+barplot(gg_BP_AS_y_notE, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Biological Process** - Go Over-representation analysis
+
+```{r, warning=FALSE, message=FALSE}
+go_overrepresentation_BP_AS_y_notE <- enrichGO(gene = AS_y_notE_ENTREZ,
+                                            OrgDb = org.Hs.eg.db,
+                                            ont = "BP",
+                                            pAdjustMethod = "BH",
+                                            pvalueCutoff = 0.05,
+                                            qvalueCutoff = 0.2,
+                                            readable = TRUE)
+head(go_overrepresentation_BP_AS_y_notE)
+barplot(go_overrepresentation_BP_AS_y_notE)
+goplot(go_overrepresentation_BP_AS_y_notE)
+```
+
+# Grupo **Related with Alternative Splicing (no focus on Expression) (AS related)**
+
+```{r, warning=FALSE, message=FALSE}
+AS_related_df <- Datos_limpios %>% 
+  dplyr::filter(Pv_wilcox < 0.05)
+
+Lista_genes_AS_related <- unique(AS_related_df$Gene)
+
+AS_related_ENTREZ <- mapIds(org.Hs.eg.db, Lista_genes_AS_related, 'ENTREZID', 'SYMBOL')
+```
+
+### **GO Celular Component** - GO classification
+
+```{r, warning=FALSE, message=FALSE}
+gg_CC_AS_related <- groupGO(gene = AS_related_ENTREZ,
+                           OrgDb = org.Hs.eg.db,
+                           ont = "CC",
+                           level = 3,
+                           readable = TRUE)
+
+head(gg_CC_AS_related)
+barplot(gg_CC_AS_related, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Celular Component** - Go Over-representation analysis
+
+```{r, warning=FALSE, message=FALSE}
+go_overrepresentation_CC_AS_related <- enrichGO(gene = AS_related_ENTREZ,
+                                               OrgDb = org.Hs.eg.db,
+                                               ont = "CC",
+                                               pAdjustMethod = "BH",
+                                               pvalueCutoff = 0.05,
+                                               qvalueCutoff = 0.2,
+                                               readable = TRUE)
+head(go_overrepresentation_CC_AS_related)
+barplot(go_overrepresentation_CC_AS_related)
+goplot(go_overrepresentation_CC_AS_related)
+```
+
+### **GO Molecular Function** - GO classification
+
+```{r, warning=FALSE, message=FALSE}
+gg_MF_AS_related <- groupGO(gene = AS_related_ENTREZ,
+                           OrgDb = org.Hs.eg.db,
+                           ont = "MF",
+                           level = 3,
+                           readable = TRUE)
+
+head(gg_MF_AS_related)
+barplot(gg_MF_AS_related, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Molecular Function** - Go Over-representation analysis
+
+```{r, warning=FALSE, message=FALSE}
+go_overrepresentation_MF_AS_related <- enrichGO(gene = AS_related_ENTREZ,
+                                               OrgDb = org.Hs.eg.db,
+                                               ont = "MF",
+                                               pAdjustMethod = "BH",
+                                               pvalueCutoff = 0.05,
+                                               qvalueCutoff = 0.2,
+                                               readable = TRUE)
+head(go_overrepresentation_MF_AS_related)
+barplot(go_overrepresentation_MF_AS_related)
+goplot(go_overrepresentation_MF_AS_related)
+```
+
+### **GO Biological Process** - GO classification
+
+```{r, warning=FALSE, message=FALSE}
+gg_BP_AS_related <- groupGO(gene = AS_related_ENTREZ,
+                           OrgDb = org.Hs.eg.db,
+                           ont = "BP",
+                           level = 3,
+                           readable = TRUE)
+
+head(gg_BP_AS_related)
+barplot(gg_BP_AS_related, drop=TRUE, showCategory=25, vertex.label.cex=0.8, font = 6)
+```
+
+### **GO Biological Process** - Go Over-representation analysis
+
+```{r, warning=FALSE, message=FALSE}
+go_overrepresentation_BP_AS_related <- enrichGO(gene = AS_related_ENTREZ,
+                                               OrgDb = org.Hs.eg.db,
+                                               ont = "BP",
+                                               pAdjustMethod = "BH",
+                                               pvalueCutoff = 0.05,
+                                               qvalueCutoff = 0.2,
+                                               readable = TRUE)
+head(go_overrepresentation_BP_AS_related)
+barplot(go_overrepresentation_BP_AS_related)
+goplot(go_overrepresentation_BP_AS_related)
+```
+
+# Información de la sesión
+
+```{r}
+sessionInfo()
+```
+
+# Referencias
+
+[1] T Wu, E Hu, S Xu, M Chen, P Guo, Z Dai, T Feng, L Zhou, W Tang, L Zhan, X Fu, S Liu, X
+  Bo, and G Yu. clusterProfiler 4.0: A universal enrichment tool for interpreting omics
+  data. The Innovation. 2021, 2(3):100141
+
+[2] https://learn.gencore.bio.nyu.edu/rna-seq-analysis/over-representation-analysis/
